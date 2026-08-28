@@ -1,6 +1,6 @@
 // Простой тест для проверки работы агента
-import { toolDefinitions } from "./dist/tools/definitions.js";
-import { executeTool } from "./dist/tools/executor.js";
+import { toolDefinitions } from "../dist/tools/definitions.js";
+import { executeTool } from "../dist/tools/executor.js";
 
 console.log("=== Тест инструментов Anime Agent ===\n");
 
