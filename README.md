@@ -1,4 +1,4 @@
-# Anime Agent
+# Useful
 
 AI-агент с поддержкой использования инструментов (tool use) на базе Claude API.
 
