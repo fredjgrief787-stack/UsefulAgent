@@ -7,6 +7,8 @@ import { getProjectContext } from "./projectContext.js";
 import { ContextManager } from "./contextManager.js";
 import { AgentStats } from "./agentStats.js";
 import { runCommand, categorizeCommand } from "./tools/runCommand.js";
+import { fromAnthropicToolUse, toAnthropicToolResult } from "./core/converters.js";
+import type { ToolCall, ToolResult } from "./core/types.js";
 import path from "node:path";
 import "dotenv/config";
 import Anthropic from "@anthropic-ai/sdk";
@@ -29,6 +31,43 @@ console.log("=================================");
 console.log("       Anime Agent");
 console.log("=================================");
 console.log("Напиши сообщение или 'exit' для выхода.\n");
+
+/**
+ * Вызов модели через Anthropic API
+ */
+async function callModel(
+    systemPrompt: string,
+    messages: Anthropic.MessageParam[]
+): Promise<Anthropic.Message> {
+    return await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: toolDefinitions,
+        messages,
+    });
+}
+
+/**
+ * Конвертация ответа модели в список ToolCall
+ */
+function convertResponse(response: Anthropic.Message): ToolCall[] {
+    const toolUseBlocks = response.content.filter(
+        (block) => block.type === "tool_use"
+    );
+    
+    return toolUseBlocks.map((block) => {
+        if (block.type === "tool_use") {
+            return fromAnthropicToolUse({
+                type: "tool_use",
+                id: block.id,
+                name: block.name,
+                input: block.input as Record<string, unknown>,
+            });
+        }
+        throw new Error("Unexpected block type");
+    });
+}
 
 async function main() {
     // Получаем контекст проекта при старте
@@ -84,13 +123,8 @@ async function main() {
                 // Записываем статистику API-запроса
                 requestStats.recordApiCall(stats.totalSize);
                 
-                const response = await client.messages.create({
-                    model: "claude-sonnet-4-6",
-                    max_tokens: 4096,
-                    system: systemPrompt,
-                    tools: toolDefinitions,
-                    messages: contextManager.getContextForClaude(),
-                });
+                // Вызов модели
+                const response = await callModel(systemPrompt, contextManager.getContextForClaude());
 
                 // Записываем размер ответа
                 const responseSize = JSON.stringify(response.content).length;
@@ -125,18 +159,16 @@ async function main() {
                         continue;
                     }
                     
-                    // Claude хочет использовать инструменты
-                    const toolUseBlocks = response.content.filter(
-                        (block) => block.type === "tool_use"
-                    );
+                    // Конвертируем ответ в ToolCall[]
+                    const toolCalls = convertResponse(response);
 
-                    if (toolUseBlocks.length === 0) {
+                    if (toolCalls.length === 0) {
                         continueLoop = false;
                         continue;
                     }
 
                     console.log(
-                        `\n[Выполняю ${toolUseBlocks.length} инструмент(ов)...]\n`
+                        `\n[Выполняю ${toolCalls.length} инструмент(ов)...]\n`
                     );
 
                     // Выполняем все запрошенные инструменты
@@ -145,62 +177,53 @@ async function main() {
                         content: [],
                     };
 
-                    for (const block of toolUseBlocks) {
-                        if (block.type === "tool_use") {
-                            console.log(`  - ${block.name}`);
-                            requestStats.recordToolCall();
+                    for (const toolCall of toolCalls) {
+                        console.log(`  - ${toolCall.name}`);
+                        requestStats.recordToolCall();
 
-                            // Специальная обработка run_command с подтверждением
-                            if (block.name === "run_command") {
-                                const command = (block.input as Record<string, unknown>).command as string;
-                                const category = categorizeCommand(command);
+                        // Специальная обработка run_command с подтверждением
+                        if (toolCall.name === "run_command") {
+                            const command = toolCall.input.command as string;
+                            const category = categorizeCommand(command);
 
-                                // Если требуется подтверждение
-                                if (category === "confirm") {
-                                    console.log(`\n⚠️  Команда требует подтверждения: ${command}`);
-                                    const confirmation = await rl.question("Выполнить? [y/N]: ");
-                                    
-                                    if (confirmation.toLowerCase() === "y") {
-                                        console.log("✓ Подтверждено, выполняю...\n");
-                                        const result = await runCommand(command, true);
-                                        const resultBlock: Anthropic.ToolResultBlockParam = {
-                                            type: "tool_result" as const,
-                                            tool_use_id: block.id,
-                                            content: result,
-                                            is_error: false,
-                                        };
-                                        (toolResults.content as Anthropic.ToolResultBlockParam[]).push(resultBlock);
-                                        requestStats.recordToolResult(result.length);
-                                    } else {
-                                        console.log("✗ Отменено пользователем\n");
-                                        const cancelMsg = "❌ Выполнение команды отменено пользователем";
-                                        (toolResults.content as Anthropic.ToolResultBlockParam[]).push({
-                                            type: "tool_result",
-                                            tool_use_id: block.id,
-                                            content: cancelMsg,
-                                            is_error: false,
-                                        });
-                                        requestStats.recordToolResult(cancelMsg.length);
-                                    }
-                                    continue;
+                            // Если требуется подтверждение
+                            if (category === "confirm") {
+                                console.log(`\n⚠️  Команда требует подтверждения: ${command}`);
+                                const confirmation = await rl.question("Выполнить? [y/N]: ");
+                                
+                                let result: ToolResult;
+                                if (confirmation.toLowerCase() === "y") {
+                                    console.log("✓ Подтверждено, выполняю...\n");
+                                    const cmdResult = await runCommand(command, true);
+                                    result = {
+                                        success: true,
+                                        content: cmdResult,
+                                        toolCallId: toolCall.id,
+                                    };
+                                } else {
+                                    console.log("✗ Отменено пользователем\n");
+                                    result = {
+                                        success: false,
+                                        content: "❌ Выполнение команды отменено пользователем",
+                                        toolCallId: toolCall.id,
+                                    };
                                 }
+                                
+                                const resultBlock = toAnthropicToolResult(result);
+                                (toolResults.content as Anthropic.ToolResultBlockParam[]).push(resultBlock);
+                                requestStats.recordToolResult(result.content.length);
+                                continue;
                             }
-
-                            // Обычное выполнение инструмента
-                            const result = await executeTool(
-                                block.name,
-                                block.input as Record<string, unknown>
-                            );
-
-                            const resultBlock: Anthropic.ToolResultBlockParam = {
-                                type: "tool_result" as const,
-                                tool_use_id: block.id,
-                                content: result.content,
-                                is_error: !result.success,
-                            };
-                            (toolResults.content as Anthropic.ToolResultBlockParam[]).push(resultBlock);
-                            requestStats.recordToolResult(result.content.length);
                         }
+
+                        // TODO: В будущем здесь будет вызов Planner для планирования многошаговых действий
+                        
+                        // Обычное выполнение инструмента
+                        const result = await executeTool(toolCall);
+
+                        const resultBlock = toAnthropicToolResult(result);
+                        (toolResults.content as Anthropic.ToolResultBlockParam[]).push(resultBlock);
+                        requestStats.recordToolResult(result.content.length);
                     }
 
                     console.log();
