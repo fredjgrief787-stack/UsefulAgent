@@ -1,5 +1,5 @@
 // Упрощенный тест run_command (с учетом ограничений Windows sandbox)
-import { runCommand } from "./dist/tools/runCommand.js";
+import { runCommand } from "../dist/tools/runCommand.js";
 
 console.log("=== Тест run_command ===\n");
 console.log("⚠️ Примечание: В Windows sandbox с ограничением EPERM команды могут не выполняться.");

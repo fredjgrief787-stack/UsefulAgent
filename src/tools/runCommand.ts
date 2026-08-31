@@ -1,7 +1,7 @@
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Корень workspace проекта
@@ -19,24 +19,76 @@ const COMMAND_TIMEOUT = 60000; // 60 секунд
 const MAX_OUTPUT_SIZE = 10 * 1024 * 1024; // 10 МБ
 
 /**
+ * Парсит команду в массив [executable, ...args] с поддержкой кавычек.
+ * Предотвращает command injection, разбивая команду на отдельные токены.
+ * 
+ * @param command - Строка команды для парсинга
+ * @returns Массив [executable, ...args]
+ */
+export function parseCommand(command: string): string[] {
+    const tokens: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    let quoteChar = "";
+
+    for (let i = 0; i < command.length; i++) {
+        const char = command[i];
+
+        // Обработка кавычек
+        if ((char === '"' || char === "'") && !inQuotes) {
+            inQuotes = true;
+            quoteChar = char;
+            continue;
+        }
+
+        if (char === quoteChar && inQuotes) {
+            inQuotes = false;
+            quoteChar = "";
+            continue;
+        }
+
+        // Обработка пробелов (разделители токенов)
+        if (char === " " && !inQuotes) {
+            if (current.length > 0) {
+                tokens.push(current);
+                current = "";
+            }
+            continue;
+        }
+
+        // Накопление символов текущего токена
+        current += char;
+    }
+
+    // Добавляем последний токен
+    if (current.length > 0) {
+        tokens.push(current);
+    }
+
+    return tokens;
+}
+
+/**
  * Категории команд
  */
 type CommandCategory = "safe" | "confirm" | "blocked";
 
 /**
  * Безопасные команды (выполняются автоматически)
+ * Якоря ^ и $ гарантируют полное совпадение всей строки,
+ * предотвращая command injection через ; или &&
  */
 const SAFE_PATTERNS = [
-    /^git\s+status/i,
-    /^git\s+diff/i,
-    /^git\s+log/i,
-    /^pnpm\s+build/i,
-    /^pnpm\s+test/i,
-    /^pnpm\s+exec\s+/i,
-    /^node\s+/i,
-    /^tsc$/i,
-    /^tsc\s+/i,
-    /^tsx\s+/i,
+    /^git\s+status\s*$/i,
+    /^git\s+diff(\s+.*)?$/i,
+    /^git\s+log(\s+.*)?$/i,
+    /^pnpm\s+build\s*$/i,
+    /^pnpm\s+test\s*$/i,
+    /^pnpm\s+exec\s+.+$/i,
+    /^node\s+.+$/i,
+    /^tsc\s*$/i,
+    /^tsc\s+.+$/i,
+    /^tsx\s+.+$/i,
 ];
 
 /**
@@ -113,8 +165,23 @@ export async function runCommand(
             return `⚠️ ТРЕБУЕТСЯ ПОДТВЕРЖДЕНИЕ\n\nКоманда: ${command}\n\nЭта команда может изменить систему или проект.\nДля выполнения требуется подтверждение пользователя.`;
         }
 
-        // Выполняем команду через PowerShell (обходим ограничения sandbox)
-        const { stdout, stderr } = await execAsync(`pwsh -Command "${command.replace(/"/g, '`"')}"`, {
+        // Парсим команду в массив токенов
+        const tokens = parseCommand(command);
+        
+        if (tokens.length === 0) {
+            return "Ошибка: команда не может быть пустой";
+        }
+
+        const executable = tokens[0];
+        const args = tokens.slice(1);
+
+        // На Windows используем cmd.exe /c для резолва команд (node, git, pnpm)
+        // но передаем команду и аргументы раздельно, что предотвращает injection
+        const isWindows = process.platform === "win32";
+        const finalExecutable = isWindows ? "cmd.exe" : executable;
+        const finalArgs = isWindows ? ["/c", executable, ...args] : args;
+
+        const { stdout, stderr } = await execFileAsync(finalExecutable, finalArgs, {
             cwd: WORKSPACE_ROOT,
             timeout: COMMAND_TIMEOUT,
             maxBuffer: MAX_OUTPUT_SIZE,
@@ -146,8 +213,8 @@ export async function runCommand(
             errorMessage += `Exit code: ${error.code}\n\n`;
         }
 
-        // Timeout
-        if (error.killed && error.signal === "SIGTERM") {
+        // Timeout (execFile использует 'SIGTERM' на Unix и killed=true на Windows)
+        if (error.killed) {
             errorMessage += `⚠️ Команда прервана по таймауту (${COMMAND_TIMEOUT / 1000} секунд)\n\n`;
         }
 

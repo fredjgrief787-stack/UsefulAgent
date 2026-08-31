@@ -1,19 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-
-/**
- * Корень workspace проекта
- */
-const WORKSPACE_ROOT = "C:\\dev\\anime-agent";
-
-/**
- * Проверяет, находится ли путь внутри workspace
- */
-function isPathSafe(targetPath: string): boolean {
-    const resolved = path.resolve(targetPath);
-    const workspaceResolved = path.resolve(WORKSPACE_ROOT);
-    return resolved.startsWith(workspaceResolved);
-}
+import { resolveWorkspacePath, WORKSPACE_ROOT } from "./workspace.js";
 
 /**
  * Запрещённые файлы для записи
@@ -33,14 +20,12 @@ export async function writeFileTool(
             return "Ошибка: путь к файлу не может быть пустым";
         }
 
-        // Разрешаем относительные пути от workspace
-        const absolutePath = path.isAbsolute(filePath)
-            ? filePath
-            : path.join(WORKSPACE_ROOT, filePath);
-
         // Проверка безопасности - файл должен быть внутри workspace
-        if (!isPathSafe(absolutePath)) {
-            return `Ошибка безопасности: невозможно записать файл за пределами workspace.\nПопытка записи: ${absolutePath}\nWorkspace: ${WORKSPACE_ROOT}`;
+        let absolutePath: string;
+        try {
+            absolutePath = resolveWorkspacePath(filePath);
+        } catch (error) {
+            return `Ошибка безопасности: невозможно записать файл за пределами workspace.\nПопытка записи: ${filePath}\n${error}`;
         }
 
         // Проверка на запрещённые файлы

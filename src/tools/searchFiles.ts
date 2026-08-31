@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { WORKSPACE_ROOT } from "./workspace.js";
 
 /**
  * Директории, которые нужно игнорировать при поиске
@@ -45,20 +46,6 @@ const BINARY_EXTENSIONS = new Set([
     ".ttf",
     ".eot",
 ]);
-
-/**
- * Корень workspace проекта
- */
-const WORKSPACE_ROOT = "C:\\dev\\anime-agent";
-
-/**
- * Проверяет, находится ли путь внутри workspace
- */
-function isPathSafe(targetPath: string): boolean {
-    const resolved = path.resolve(targetPath);
-    const workspaceResolved = path.resolve(WORKSPACE_ROOT);
-    return resolved.startsWith(workspaceResolved);
-}
 
 /**
  * Проверяет, является ли файл бинарным по расширению
@@ -148,11 +135,6 @@ async function searchInDirectory(
 export async function searchFiles(query: string): Promise<string> {
     if (!query || query.trim().length === 0) {
         return "Ошибка: запрос для поиска не может быть пустым";
-    }
-
-    // Проверка безопасности workspace
-    if (!isPathSafe(WORKSPACE_ROOT)) {
-        return "Ошибка безопасности: невалидный workspace root";
     }
 
     const results: Array<{ file: string; line: number; content: string }> = [];

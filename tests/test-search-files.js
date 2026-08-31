@@ -1,5 +1,5 @@
 // Тест для проверки search_files
-import { searchFiles } from "./dist/tools/searchFiles.js";
+import { searchFiles } from "../dist/tools/searchFiles.js";
 
 console.log("=== Тест search_files ===\n");
 

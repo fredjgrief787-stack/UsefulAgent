@@ -1,5 +1,5 @@
 // Тест системы категоризации команд
-import { categorizeCommand } from "./dist/tools/runCommand.js";
+import { categorizeCommand } from "../dist/tools/runCommand.js";
 
 console.log("=== Тест системы категоризации команд ===\n");
 
@@ -71,6 +71,25 @@ for (const cmd of blockedCommands) {
 
 console.log("\n" + "=".repeat(60) + "\n");
 
+// Тест command injection (должны быть заблокированы или требовать подтверждения)
+console.log("🛡️ COMMAND INJECTION тесты (НЕ должны быть safe):\n");
+
+const injectionCommands = [
+    "git status; rm -rf /",
+    "git status && del /s /q C:",
+    "pnpm build; shutdown",
+    "node script.js && format C:",
+    "tsc; Remove-Item -Recurse -Force C:\\Users",
+];
+
+for (const cmd of injectionCommands) {
+    const category = categorizeCommand(cmd);
+    const status = category !== "safe" ? "✅" : "❌ VULNERABLE!";
+    console.log(`${status} ${category.padEnd(10)} | ${cmd}`);
+}
+
+console.log("\n" + "=".repeat(60) + "\n");
+
 // Подсчет результатов
 let passCount = 0;
 let failCount = 0;
@@ -90,6 +109,12 @@ for (const cmd of confirmCommands) {
 // Проверка blocked
 for (const cmd of blockedCommands) {
     if (categorizeCommand(cmd) === "blocked") passCount++;
+    else failCount++;
+}
+
+// Проверка injection (НЕ должны быть safe)
+for (const cmd of injectionCommands) {
+    if (categorizeCommand(cmd) !== "safe") passCount++;
     else failCount++;
 }
 

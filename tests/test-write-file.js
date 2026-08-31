@@ -1,6 +1,6 @@
 // Тест для проверки write_file
-import { writeFileTool } from "./dist/tools/writeFile.js";
-import { readFileTool } from "./dist/tools/readFile.js";
+import { writeFileTool } from "../dist/tools/writeFile.js";
+import { readFileTool } from "../dist/tools/readFile.js";
 import fs from "node:fs/promises";
 
 console.log("=== Тест write_file ===\n");
@@ -43,14 +43,20 @@ const result5 = await writeFileTool("../../outside.txt", "Это не должн
 console.log(result5);
 console.log();
 
-// Тест 7: Попытка записи в .env (должна быть заблокирована)
-console.log("7. Проверка безопасности - попытка записи в .env...");
-const result6 = await writeFileTool(".env", "API_KEY=test");
+// Тест 7: Соседняя директория с похожим именем (баг startsWith)
+console.log("7. Проверка безопасности - соседняя директория (anime-agent-evil)...");
+const result6 = await writeFileTool("C:\\dev\\anime-agent-evil\\malicious.txt", "Это не должно сработать");
 console.log(result6);
 console.log();
 
+// Тест 8: Попытка записи в .env (должна быть заблокирована)
+console.log("8. Проверка безопасности - попытка записи в .env...");
+const result7 = await writeFileTool(".env", "API_KEY=test");
+console.log(result7);
+console.log();
+
 // Очистка тестовых файлов
-console.log("8. Очистка тестовых файлов...");
+console.log("9. Очистка тестовых файлов...");
 try {
     await fs.unlink("test_output.txt");
     await fs.rm("test_dir", { recursive: true });
