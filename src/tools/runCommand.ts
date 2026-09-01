@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { getPlatformAdapter } from "../platform/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -175,11 +176,9 @@ export async function runCommand(
         const executable = tokens[0];
         const args = tokens.slice(1);
 
-        // Список известных .cmd/.bat обёрток на Windows
-        // После CVE-2024-27980 эти команды требуют { shell: true } для корректной работы
-        const CMD_WRAPPERS = ['pnpm', 'npm', 'npx', 'tsc', 'tsx'];
-        const isCmdWrapper = process.platform === 'win32' && 
-                            CMD_WRAPPERS.includes(executable.toLowerCase());
+        // Получаем адаптер платформы для определения специфики ОС
+        const adapter = await getPlatformAdapter();
+        const isCmdWrapper = adapter.isCmdWrapper(executable);
 
         // Для .cmd/.bat используем shell: true (Node.js сам экранирует аргументы)
         // Для нативных .exe - без shell (более безопасно)
