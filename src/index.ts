@@ -1,24 +1,25 @@
 import { readFileTool } from "./tools/readFile.js";
 import { getTree } from "./tools/tree.js";
-import { toolDefinitions } from "./tools/definitions.js";
 import { executeTool } from "./tools/executor.js";
 import { getSystemPrompt } from "./prompt.js";
 import { getProjectContext } from "./projectContext.js";
 import { ContextManager } from "./contextManager.js";
 import { AgentStats } from "./agentStats.js";
 import { runCommand, categorizeCommand } from "./tools/runCommand.js";
-import { fromAnthropicToolUse, toAnthropicToolResult } from "./core/converters.js";
+import { toAnthropicToolResult } from "./core/converters.js";
 import type { ToolCall, ToolResult } from "./core/types.js";
+import { AnthropicProvider } from "./providers/anthropic.js";
 import path from "node:path";
 import "dotenv/config";
 import Anthropic from "@anthropic-ai/sdk";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 
-const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    baseURL: "https://api.claudehub.fun",
-});
+// Инициализация провайдера модели
+const modelProvider = new AnthropicProvider(
+    process.env.ANTHROPIC_API_KEY!,
+    process.env.ANTHROPIC_BASE_URL // undefined если не задан -> SDK использует официальный API
+);
 
 const rl = readline.createInterface({
     input,
@@ -32,49 +33,22 @@ console.log("       Anime Agent");
 console.log("=================================");
 console.log("Напиши сообщение или 'exit' для выхода.\n");
 
-/**
- * Вызов модели через Anthropic API
- */
-async function callModel(
-    systemPrompt: string,
-    messages: Anthropic.MessageParam[]
-): Promise<Anthropic.Message> {
-    return await client.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 4096,
-        system: systemPrompt,
-        tools: toolDefinitions,
-        messages,
-    });
-}
-
-/**
- * Конвертация ответа модели в список ToolCall
- */
-function convertResponse(response: Anthropic.Message): ToolCall[] {
-    const toolUseBlocks = response.content.filter(
-        (block) => block.type === "tool_use"
-    );
-    
-    return toolUseBlocks.map((block) => {
-        if (block.type === "tool_use") {
-            return fromAnthropicToolUse({
-                type: "tool_use",
-                id: block.id,
-                name: block.name,
-                input: block.input as Record<string, unknown>,
-            });
-        }
-        throw new Error("Unexpected block type");
-    });
-}
-
 async function main() {
     // Получаем контекст проекта при старте
     console.log("Загрузка контекста проекта...");
     const projectContext = await getProjectContext(process.cwd());
     const systemPrompt = getSystemPrompt(projectContext);
     console.log("✓ Контекст загружен\n");
+    
+    // Проверяем возможности провайдера
+    const capabilities = modelProvider.getCapabilities();
+    if (!capabilities.supportsNativeToolUse) {
+        console.error(`⚠️  ВНИМАНИЕ: Провайдер "${modelProvider.getProviderName()}" не поддерживает нативный tool calling.`);
+        console.error(`   Этот агент требует поддержки function calling для работы инструментов.`);
+        console.error(`   Пожалуйста, используйте провайдер с поддержкой tool use (Anthropic Claude, OpenAI GPT-4).\n`);
+        process.exit(1);
+    }
+    
     while (true) {
         const userInput = await rl.question("> ");
 
@@ -123,8 +97,22 @@ async function main() {
                 // Записываем статистику API-запроса
                 requestStats.recordApiCall(stats.totalSize);
                 
-                // Вызов модели
-                const response = await callModel(systemPrompt, contextManager.getContextForClaude());
+                // Вызов модели через провайдер
+                let modelResponse;
+                try {
+                    modelResponse = await modelProvider.sendMessage(systemPrompt, contextManager.getContextForClaude());
+                } catch (error: any) {
+                    console.error(`\n❌ Ошибка при вызове провайдера "${modelProvider.getProviderName()}": ${error.message}`);
+                    console.error(`   Проверьте подключение к сети, правильность API-ключа и доступность сервиса.`);
+                    console.error(`   Попробуйте снова или смените провайдера в конфигурации.\n`);
+                    continueLoop = false;
+                    break;
+                }
+                
+                // ВРЕМЕННО: rawResponse приводится к Anthropic.Message, т.к. текущий активный провайдер - AnthropicProvider
+                // TODO: когда появится выбор провайдеров, нужно будет обрабатывать разные форматы rawResponse
+                const response = modelResponse.rawResponse as Anthropic.Message;
+                const toolCalls = modelResponse.toolCalls;
 
                 // Записываем размер ответа
                 const responseSize = JSON.stringify(response.content).length;
@@ -159,8 +147,7 @@ async function main() {
                         continue;
                     }
                     
-                    // Конвертируем ответ в ToolCall[]
-                    const toolCalls = convertResponse(response);
+                    // ToolCalls уже получены из modelProvider.sendMessage
 
                     if (toolCalls.length === 0) {
                         continueLoop = false;
