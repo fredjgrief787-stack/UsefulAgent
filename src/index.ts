@@ -183,7 +183,20 @@ async function main() {
 
                         // Специальная обработка run_command с подтверждением
                         if (toolCall.name === "run_command") {
-                            const command = toolCall.input.command as string;
+                            // Валидация наличия команды перед категоризацией
+                            if (!toolCall.input.command || typeof toolCall.input.command !== "string") {
+                                const result: ToolResult = {
+                                    success: false,
+                                    content: "Ошибка валидации: поле 'command' обязательно и должно быть строкой",
+                                    toolCallId: toolCall.id,
+                                };
+                                const resultBlock = toAnthropicToolResult(result);
+                                (toolResults.content as Anthropic.ToolResultBlockParam[]).push(resultBlock);
+                                requestStats.recordToolResult(result.content.length);
+                                continue;
+                            }
+                            
+                            const command = toolCall.input.command;
                             const category = categorizeCommand(command);
 
                             // Если требуется подтверждение

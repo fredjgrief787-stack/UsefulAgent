@@ -15,7 +15,15 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     try {
         switch (name) {
             case "read_file": {
-                const filePath = input.file_path as string;
+                // Валидация обязательного поля file_path
+                if (!input.file_path || typeof input.file_path !== "string") {
+                    return {
+                        success: false,
+                        content: "Ошибка валидации: поле 'file_path' обязательно и должно быть строкой",
+                        toolCallId: id,
+                    };
+                }
+                const filePath = input.file_path;
                 const content = await readFileTool(filePath);
                 return {
                     success: true,
@@ -25,7 +33,15 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
             }
 
             case "get_directory_tree": {
-                const directory = (input.directory as string) || process.cwd();
+                // directory опциональное, но если присутствует — должно быть строкой
+                if (input.directory !== undefined && typeof input.directory !== "string") {
+                    return {
+                        success: false,
+                        content: "Ошибка валидации: поле 'directory' должно быть строкой",
+                        toolCallId: id,
+                    };
+                }
+                const directory = input.directory || process.cwd();
                 const tree = await getTree(directory);
                 return {
                     success: true,
@@ -35,7 +51,15 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
             }
 
             case "search_files": {
-                const query = input.query as string;
+                // Валидация обязательного поля query
+                if (!input.query || typeof input.query !== "string") {
+                    return {
+                        success: false,
+                        content: "Ошибка валидации: поле 'query' обязательно и должно быть строкой",
+                        toolCallId: id,
+                    };
+                }
+                const query = input.query;
                 const results = await searchFiles(query);
                 return {
                     success: true,
@@ -45,8 +69,23 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
             }
 
             case "write_file": {
-                const filePath = input.file_path as string;
-                const content = input.content as string;
+                // Валидация обязательных полей file_path и content
+                if (!input.file_path || typeof input.file_path !== "string") {
+                    return {
+                        success: false,
+                        content: "Ошибка валидации: поле 'file_path' обязательно и должно быть строкой",
+                        toolCallId: id,
+                    };
+                }
+                if (input.content === undefined || typeof input.content !== "string") {
+                    return {
+                        success: false,
+                        content: "Ошибка валидации: поле 'content' обязательно и должно быть строкой",
+                        toolCallId: id,
+                    };
+                }
+                const filePath = input.file_path;
+                const content = input.content;
                 const result = await writeFileTool(filePath, content);
                 return {
                     success: true,
@@ -56,7 +95,15 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
             }
 
             case "run_command": {
-                const command = input.command as string;
+                // Валидация обязательного поля command
+                if (!input.command || typeof input.command !== "string") {
+                    return {
+                        success: false,
+                        content: "Ошибка валидации: поле 'command' обязательно и должно быть строкой",
+                        toolCallId: id,
+                    };
+                }
+                const command = input.command;
                 const result = await runCommand(command);
                 return {
                     success: true,
@@ -75,7 +122,7 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     } catch (error) {
         return {
             success: false,
-            content: `Ошибка выполнения инструмента ${name}: ${error}`,
+            content: `Ошибка выполнения инструмента ${name}: ${error instanceof Error ? error.message : String(error)}`,
             toolCallId: id,
         };
     }

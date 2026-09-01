@@ -175,18 +175,23 @@ export async function runCommand(
         const executable = tokens[0];
         const args = tokens.slice(1);
 
-        // На Windows используем cmd.exe /c для резолва команд (node, git, pnpm)
-        // но передаем команду и аргументы раздельно, что предотвращает injection
-        const isWindows = process.platform === "win32";
-        const finalExecutable = isWindows ? "cmd.exe" : executable;
-        const finalArgs = isWindows ? ["/c", executable, ...args] : args;
+        // Список известных .cmd/.bat обёрток на Windows
+        // После CVE-2024-27980 эти команды требуют { shell: true } для корректной работы
+        const CMD_WRAPPERS = ['pnpm', 'npm', 'npx', 'tsc', 'tsx'];
+        const isCmdWrapper = process.platform === 'win32' && 
+                            CMD_WRAPPERS.includes(executable.toLowerCase());
 
-        const { stdout, stderr } = await execFileAsync(finalExecutable, finalArgs, {
+        // Для .cmd/.bat используем shell: true (Node.js сам экранирует аргументы)
+        // Для нативных .exe - без shell (более безопасно)
+        const options = {
             cwd: WORKSPACE_ROOT,
             timeout: COMMAND_TIMEOUT,
             maxBuffer: MAX_OUTPUT_SIZE,
-            encoding: "utf8",
-        });
+            encoding: "utf8" as const,
+            ...(isCmdWrapper && { shell: true }),
+        };
+
+        const { stdout, stderr } = await execFileAsync(executable, args, options);
 
         // Формируем результат
         let result = `✅ Команда выполнена успешно (exit code: 0)\n\n`;
@@ -213,7 +218,7 @@ export async function runCommand(
             errorMessage += `Exit code: ${error.code}\n\n`;
         }
 
-        // Timeout (execFile использует 'SIGTERM' на Unix и killed=true на Windows)
+        // Timeout (execFile на Windows использует killed=true)
         if (error.killed) {
             errorMessage += `⚠️ Команда прервана по таймауту (${COMMAND_TIMEOUT / 1000} секунд)\n\n`;
         }
